@@ -11,3 +11,5 @@ __pycache__/
 .streamlit/
 .venv/
 __pycache__/
+
+storage.sqlite.backup.py

@@ -120,3 +120,117 @@ if __name__ == "__main__":
     initialize()
     print(DB)
 
+
+# ----------------------------------------
+# Supabase PostgreSQL 연결
+# ----------------------------------------
+def enable_supabase():
+    import psycopg
+    import streamlit as st
+    from psycopg.rows import dict_row
+
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        database_url = st.secrets.get("DATABASE_URL")
+
+    if not database_url:
+        raise RuntimeError("DATABASE_URL이 설정되지 않았습니다.")
+
+    def pg_connect():
+        return psycopg.connect(
+            database_url,
+            row_factory=dict_row,
+            connect_timeout=30,
+            sslmode="require",
+        )
+
+    def pg_sql(query):
+        # 기존 SQLite 쿼리를 PostgreSQL 문법으로 변환
+        query = query.replace("?", "%s")
+        query = query.replace(
+            "json_extract(p.details,'$.process_type')",
+            "(p.details::jsonb ->> 'process_type')",
+        )
+        return query
+
+    def pg_initialize():
+        # 테이블과 데이터는 이미 Supabase에 이전 완료
+        with pg_connect() as conn:
+            conn.execute("SELECT 1 FROM material LIMIT 1")
+
+    def pg_rows(query, args=()):
+        with pg_connect() as conn:
+            return conn.execute(
+                pg_sql(query), args
+            ).fetchall()
+
+    def pg_execute(query, args=()):
+        with pg_connect() as conn:
+            conn.execute(pg_sql(query), args)
+
+    def pg_import_run(name, raw, events, prediction):
+        digest = hashlib.sha256(raw.encode()).hexdigest()
+
+        with pg_connect() as conn:
+            result = conn.execute(
+                """
+                INSERT INTO run
+                    (digest, name, raw_log, prediction)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT(digest) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    digest,
+                    name,
+                    raw,
+                    json.dumps(prediction)
+                    if prediction is not None else None,
+                ),
+            ).fetchone()
+
+            if result is None:
+                existing = conn.execute(
+                    "SELECT id FROM run WHERE digest = %s",
+                    (digest,),
+                ).fetchone()
+                return existing["id"], False
+
+            run_id = result["id"]
+
+            values = [
+                (
+                    run_id,
+                    e["line"],
+                    e["seconds"],
+                    e["kind"],
+                    json.dumps(e["payload"]),
+                    e["raw"],
+                )
+                for e in events
+            ]
+
+            if values:
+                with conn.cursor() as cursor:
+                    cursor.executemany(
+                        """
+                        INSERT INTO event
+                        (run_id, line, seconds, kind, payload, raw)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        values,
+                    )
+
+            return run_id, True
+
+    globals()["initialize"] = pg_initialize
+    globals()["rows"] = pg_rows
+    globals()["execute"] = pg_execute
+    globals()["import_run"] = pg_import_run
+
+
+# DATABASE_URL이 있으면 Supabase 사용
+import streamlit as st
+
+if os.environ.get("DATABASE_URL") or st.secrets.get("DATABASE_URL"):
+    enable_supabase()
