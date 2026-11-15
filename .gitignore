@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+.streamlit/
+
+*.sqlite3
+*.db
+.env
+.streamlit/
+.venv/
+__pycache__/

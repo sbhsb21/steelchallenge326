@@ -1,0 +1,16 @@
+User Level
+University Student
+Steel Grade
+Linepipe Steel
+Temperature required
+1655-1685°C
+Mass required
+80-110 tonnes
+Maximum time
+1h 30m
+CO2EmissionsRequired
+20000 Kg CO2
+Slag composition
+Basicity: 1.5-2.5
+%MgO: 8-12
+%FeO: 10-50
