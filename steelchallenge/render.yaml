@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: steelchallenge
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python start_cloud.py
+    healthCheckPath: /_stcore/health
+    disk:
+      name: steelchallenge-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.12"
+      - key: STEEL_DB
+        value: /var/data/steelchallenge.sqlite3
+      - key: STEEL_ALLOWED_EMAILS
+        sync: false

@@ -1,0 +1,3 @@
+streamlit>=1.45,<2
+scipy>=1.13,<2
+Authlib>=1.3.2,<2
