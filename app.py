@@ -13,6 +13,35 @@ from run_candidates import rank_runs
 import storage
 
 st.set_page_config(page_title="SteelChallenge", layout="wide")
+
+import hmac
+
+# 비밀번호 로그인
+if "APP_PASSWORD" not in st.secrets:
+    st.error("앱 비밀번호가 설정되지 않았습니다.")
+    st.stop()
+
+if not st.session_state.get("authenticated", False):
+    st.title("SteelChallenge 로그인")
+
+    password = st.text_input("접속 비밀번호", type="password")
+
+    if st.button("로그인"):
+        if hmac.compare_digest(
+            password,
+            st.secrets["APP_PASSWORD"]
+        ):
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+
+    st.stop()
+
+if st.sidebar.button("접속 종료"):
+    st.session_state["authenticated"] = False
+    st.rerun()
+
 if os.environ.get("RENDER") == "true" or os.environ.get("STEEL_REQUIRE_LOGIN") == "1":
     allowed = {email.strip().casefold() for email in
                os.environ.get("STEEL_ALLOWED_EMAILS", "").split(",") if email.strip()}
