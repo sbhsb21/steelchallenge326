@@ -10,6 +10,7 @@ import eventlog
 from grade_clipboard import parse_composition, parse_process
 import model
 from run_candidates import rank_runs
+from run_verdict import LABELS, run_checks, saved_verdict
 import storage
 
 st.set_page_config(page_title="SteelChallenge", layout="wide")
@@ -79,8 +80,12 @@ def read_amounts(text, stages):
     return items
 
 
-page = st.sidebar.radio("화면", ["후보 탐색", "강종 조건", "품목·회수율", "공정 경로",
+page = st.sidebar.radio("화면", ["후보 탐색", "2차정련 예측", "강종 조건", "품목·회수율", "공정 경로",
                               "계산기", "Run 가져오기·비교"])
+
+if page == "2차정련 예측":
+    import secondary_ui
+    secondary_ui.render(storage, materials, recovery)
 
 if page == "품목·회수율":
     st.header(page)
@@ -424,8 +429,40 @@ if page == "Run 가져오기·비교":
     if runs:
         st.subheader("기록된 Run")
         st.caption(f"저장된 Run {len(runs)}건")
-        run = st.selectbox("비교 대상", runs, format_func=lambda r: f"#{r['id']} · {r['name']}")
-        actual = json.loads(run["actual"])
+        actual_by_run = {r["id"]: json.loads(r["actual"]) for r in runs}
+        master_by_run = {r["run_id"]: json.loads(r["result"])
+                         for r in storage.rows("SELECT run_id,result FROM master_run")}
+        pdf_by_run = {}
+        for row in storage.rows("SELECT run_id,details FROM pdf_source ORDER BY source"):
+            pdf_by_run.setdefault(row["run_id"], json.loads(row["details"]))
+        verdict_by_run = {
+            rid: saved_verdict(actual, master_by_run.get(rid, {}), pdf_by_run.get(rid, {}))
+            for rid, actual in actual_by_run.items()
+        }
+        by_id = {r["id"]: r for r in runs}
+        selected = st.selectbox(
+            "비교 대상", list(by_id), key="run-compare-selection",
+            format_func=lambda rid: f"#{rid} · {LABELS[verdict_by_run[rid]]} · {by_id[rid]['name']}",
+        )
+        run = by_id[selected]
+        actual = actual_by_run[selected]
+        verdict = verdict_by_run[selected]
+        checks, other_failures = run_checks(actual, master_by_run.get(selected, {}), pdf_by_run.get(selected, {}))
+        st.subheader("규격 판정")
+        {"pass": st.success, "fail": st.error, "unknown": st.info}[verdict](f"최종 판정 · {LABELS[verdict]}")
+        failures = [row["name"] for row in checks if row["verdict"].startswith("불합격")]
+        if failures or other_failures:
+            st.write("불합격 항목 · " + ", ".join([*failures, *other_failures]))
+        elif verdict == "fail":
+            st.caption("저장된 자료에서 불합격 항목을 특정할 수 없습니다.")
+        st.caption("이 Run에 저장된 결과와 규격을 사용합니다. 기준이나 실측이 없는 항목은 표에 표시합니다.")
+        for group, title in (("공정", "온도·시간 등 공정 조건"), ("조성", "원소별 조성"), ("슬래그", "슬래그")):
+            rows = [{"항목": row["name"], "단위": row["unit"], "실측": row["value"],
+                     "하한": row["min"], "상한": row["max"], "판정": row["verdict"]}
+                    for row in checks if row["group"] == group]
+            if rows:
+                st.markdown(f"**{title}**")
+                st.dataframe(rows, hide_index=True)
         predicted = json.loads(run["prediction"]) if run["prediction"] else {}
         pdf_reports = storage.rows("SELECT source,details FROM pdf_source WHERE run_id=? ORDER BY source", (run["id"],))
         if pdf_reports:
@@ -481,6 +518,8 @@ if page == "Run 가져오기·비교":
                         for key, value in data.get(group, {}).items():
                             if value is not None:
                                 model.number(value, key)
+                    for group, maximum in (("chemistry", 100), ("process", float("inf")), ("slag", float("inf"))):
+                        model.validate_limits(data.get("limits", {}).get(group, {}), maximum)
                     storage.execute("UPDATE run SET actual=? WHERE id=?", (dump(data), run["id"]))
                     st.rerun()
         comparisons = []
@@ -494,10 +533,17 @@ if page == "Run 가져오기·비교":
                 comparisons.append({"구분": group, "항목": key, "예측": expected, "실측": observed, "실측−예측": delta})
         if comparisons:
             st.dataframe(comparisons, hide_index=True)
-        summary = [{"Run": r["id"], "이름": r["name"], "가져온 시각 (UTC)": r["imported_at"],
-                    **{f"{g}.{k}": v for g, fields in json.loads(r["actual"]).items()
-                       if g in {"chemistry", "process", "cost"} for k, v in fields.items()}}
-                   for r in runs]
+        summary = []
+        for item in runs:
+            rid = item["id"]
+            data = actual_by_run[rid]
+            details, reasons = run_checks(data, master_by_run.get(rid, {}), pdf_by_run.get(rid, {}))
+            failures = [row["name"] for row in details if row["verdict"].startswith("불합격")]
+            summary.append({"Run": rid, "이름": item["name"], "판정": LABELS[verdict_by_run[rid]],
+                            "불합격 항목": ", ".join([*failures, *reasons]),
+                            "가져온 시각 (UTC)": item["imported_at"],
+                            **{f"{g}.{k}": v for g in ("chemistry", "process", "cost")
+                               for k, v in data.get(g, {}).items()}})
         st.download_button("Run 비교 CSV", pd.DataFrame(summary).to_csv(index=False).encode("utf-8-sig"),
                            "runs.csv")
     review = storage.rows("SELECT source,reason,transcript FROM pdf_review ORDER BY source")
