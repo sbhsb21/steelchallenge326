@@ -80,8 +80,12 @@ def read_amounts(text, stages):
     return items
 
 
-page = st.sidebar.radio("화면", ["후보 탐색", "2차정련 예측", "강종 조건", "품목·회수율", "공정 경로",
+page = st.sidebar.radio("화면", ["후보 탐색", "2차정련 예측", "2차정련 최저비용 탐색", "강종 조건", "품목·회수율", "공정 경로",
                               "계산기", "Run 가져오기·비교"])
+
+if page == "2차정련 최저비용 탐색":
+    from secondary_search_ui import render
+    render()
 
 if page == "2차정련 예측":
     import secondary_ui
